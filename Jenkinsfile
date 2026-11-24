@@ -161,7 +161,17 @@ pipeline {
                     }
                 }
                 stage('Trivy (dependency scan)') {
-                    agent { docker { image 'aquasec/trivy:latest' } }
+                    // `--entrypoint=` clears the image's built-in ENTRYPOINT.
+                    // Jenkins keeps a stage container alive by running `cat`
+                    // in it; with an ENTRYPOINT of `trivy`, that becomes
+                    // `trivy cat`, the container exits at once and the stage
+                    // fails before scanning anything.
+                    agent {
+                        docker {
+                            image 'aquasec/trivy:latest'
+                            args '--entrypoint='
+                        }
+                    }
                     steps {
                         sh 'trivy fs --exit-code 1 --severity CRITICAL,HIGH --no-progress .'
                     }
@@ -183,7 +193,13 @@ pipeline {
                     // password got committed to git". Gitleaks scans the
                     // full commit history for exactly that. See .gitleaks.toml
                     // for the one documented allowlist entry.
-                    agent { docker { image 'zricethezav/gitleaks:latest' } }
+                    // Same ENTRYPOINT issue as the Trivy stage above.
+                    agent {
+                        docker {
+                            image 'zricethezav/gitleaks:latest'
+                            args '--entrypoint='
+                        }
+                    }
                     steps {
                         sh 'gitleaks detect --source . --redact --config .gitleaks.toml --exit-code 1'
                     }

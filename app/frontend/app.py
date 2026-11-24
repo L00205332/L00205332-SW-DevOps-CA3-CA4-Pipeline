@@ -75,5 +75,8 @@ def delete_task(task_id: str):
 
 
 if __name__ == "__main__":
-    # Dev-only entry point; the Dockerfile serves this with gunicorn instead.
-    app.run(host="0.0.0.0", port=5000)
+    # Dev-only entry point; the Dockerfile serves this with gunicorn instead
+    # (which binds 0.0.0.0 on purpose, inside the container). Bound to
+    # loopback here so running `python app.py` on a laptop doesn't expose
+    # the Flask dev server to the whole network (Bandit B104).
+    app.run(host="127.0.0.1", port=5000)
