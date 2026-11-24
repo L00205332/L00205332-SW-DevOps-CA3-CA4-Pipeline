@@ -1,0 +1,30 @@
+{# Shared create/edit form. `task` is None on create (empty form), or a
+   dict from the backend on edit (form pre-filled, status field shown). #}
+{% extends "base.html" %}
+{% block content %}
+  <h2>{{ "Edit task" if task else "New task" }}</h2>
+  <form method="post">
+    <label>
+      Title
+      <input type="text" name="title" value="{{ task.title if task else '' }}" required>
+    </label>
+    <label>
+      Description
+      <textarea name="description">{{ task.description if task else '' }}</textarea>
+    </label>
+    {# Status can only be changed on an existing task — a new task always
+       starts as "todo" (see backend_client.create_task / TaskCreate). #}
+    {% if task %}
+    <label>
+      Status
+      <select name="status">
+        {% for value in ["todo", "in_progress", "done"] %}
+        <option value="{{ value }}" {{ "selected" if task.status == value else "" }}>{{ value }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    <button type="submit">Save</button>
+    <a href="{{ url_for('index') }}">Cancel</a>
+  </form>
+{% endblock %}
