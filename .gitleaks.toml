@@ -1,0 +1,14 @@
+# Gitleaks config - scans the full git history (not just the current
+# working tree) for things that look like committed secrets: API keys,
+# private keys, high-entropy tokens, etc. Run in the Jenkinsfile's stage 4
+# alongside Bandit (code-pattern security issues) and Trivy (known CVEs in
+# dependencies) - none of those three catch "a real credential got
+# committed", which is what this is for.
+
+title = "tasktracker gitleaks config"
+
+[allowlist]
+description = "docker-compose.yml's Postgres password is an intentional, documented, local-dev-only throwaway value (see that file's own comment) - not a real credential. Nothing else in this repo is allowlisted; a finding anywhere else should be treated as real."
+paths = [
+  '''^docker-compose\.yml$''',
+]

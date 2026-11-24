@@ -1,0 +1,41 @@
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# --- Terraform ---
+# .terraform.lock.hcl IS committed on purpose (pins provider versions for
+# reproducible `terraform init` runs) - only the local working state below
+# is ignored.
+infra/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# --- Secrets / local env overrides ---
+.env
+.env.*
+!.env.example
+
+# --- Jenkins (if run with a bind-mounted home dir) ---
+jenkins/jenkins_home/
+
+# --- Claude Code local settings (personal, not shared) ---
+.claude/settings.local.json
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,99 @@
+# Shared lint/format/security config for both tiers (app/backend and
+# app/frontend), kept in ONE file at the repo root instead of one per tier.
+#
+# Why this works even though backend and frontend have separate venvs:
+# ruff, black, and bandit all do "upward config discovery" - when you run
+# them against a file, they walk up the directory tree from that file's
+# location looking for a config file (pyproject.toml, or a tool-specific
+# one like ruff.toml), and stop at the first one found. So running
+# `ruff check app/backend/app` from the repo root - or even running ruff
+# from inside app/backend's own venv, as long as the current directory is
+# still somewhere under this repo - still finds THIS file and uses it.
+# One shared config = backend and frontend are held to the same style and
+# security rules, with no risk of the two drifting out of sync.
+#
+# pyproject.toml itself is just the standard place Python tooling looks
+# for project-level config (defined in PEP 518/621) - using it here means
+# we don't need three separate config files (ruff.toml, a black section in
+# setup.cfg, .bandit) scattered around the repo.
+
+[tool.ruff]
+# ruff is the linter: it reads the code without running it and flags
+# things like unused imports, undefined names, and style violations.
+# It's written in Rust and replaces what used to be several separate tools
+# (flake8, isort, pyupgrade, …) with one much faster one.
+
+# 100, not the traditional 79/88, because FastAPI/SQLAlchemy type hints
+# (e.g. `Mapped[str] = mapped_column(String(36), primary_key=True, ...)`)
+# get unreadable when wrapped too aggressively. Matches black's
+# line-length below on purpose - if the two disagreed, black would
+# "fix" lines that ruff would then immediately flag again.
+line-length = 100
+
+# Tells ruff which Python version's syntax to assume is available, so
+# e.g. the `UP` rules below know match/case or `str | None` union syntax
+# is fine to suggest (both need 3.10+; this project targets 3.12 to match
+# the `python:3.12-slim` base image used in both Dockerfiles).
+target-version = "py312"
+
+# Where ruff looks for FIRST-PARTY code, relative to this file. Without it,
+# ruff only checks the repo root, would not recognise our `app` package
+# (app/backend/app) or `backend_client` module (app/frontend) as ours, and
+# the "I" import-sorting rule would then demand a different import layout.
+src = ["app/backend", "app/frontend"]
+
+[tool.ruff.lint]
+# Each letter below is a *category* of rules, not a single rule - ruff
+# documents the full list each one expands to at docs.astral.sh/ruff/rules.
+select = [
+    "E",  # pycodestyle errors - basic PEP 8 style (spacing, indentation, line length)
+    "F",  # pyflakes - the "would this actually break" category: unused imports/
+          #            variables, undefined names, f-strings with no placeholders
+    "I",  # isort - import statements sorted and grouped consistently
+          #          (stdlib, then third-party, then local - alphabetical within each)
+    "UP", # pyupgrade - flags old-style syntax when a newer Python version
+          #              (see target-version above) supports something simpler,
+          #              e.g. `Optional[str]` -> `str | None`
+    "B",  # flake8-bugbear - catches things that are *valid* Python but almost
+          #                  always a bug, e.g. a mutable default argument
+          #                  (`def f(x=[])`) that gets silently shared/mutated
+          #                  across every call
+]
+# No `ignore = [...]` yet: if a specific rule ever fires on something that's
+# intentional rather than a real problem, add it here with a one-line reason
+# rather than silencing it at the call site with a bare `# noqa`.
+
+[tool.ruff.lint.flake8-bugbear]
+# Bugbear's B008 forbids function calls in argument defaults, because a
+# default is evaluated once and shared. FastAPI's `db: Session = Depends(get_db)`
+# is the framework's intended pattern (Depends is only a marker, evaluated
+# per request), so we declare it safe instead of silencing the rule globally.
+extend-immutable-calls = ["fastapi.Depends"]
+
+[tool.black]
+# black is the formatter: unlike ruff's lint rules (which flag problems),
+# black actually rewrites the file - consistent quote style, spacing,
+# trailing commas - so nobody has to argue about formatting in review.
+# `black --check` (used in the Jenkinsfile's Build stage) fails the build
+# if a file isn't already in black's formatting, without changing anything;
+# plain `black .` is what you'd run locally to fix it.
+line-length = 100
+target-version = ["py312"]
+
+[tool.bandit]
+# bandit is the security linter (distinct from ruff's `B` bugbear rules
+# above, despite the similar letter): it looks specifically for Python
+# security anti-patterns - e.g. `subprocess` calls built from string
+# concatenation (shell injection risk), `assert` used for security checks
+# (stripped out when Python runs with -O), hardcoded passwords/API keys,
+# use of `eval`/`pickle.load` on untrusted input.
+#
+# Scanned with: bandit -r app/backend/app app/frontend -c pyproject.toml
+# (the Jenkinsfile's static-analysis stage; see also sonar-project.properties
+# and trivy, which cover dependency/image vulnerabilities rather than
+# patterns in our own code).
+exclude_dirs = ["tests", ".venv"]
+# Test code legitimately does things that would be a real finding in
+# application code - e.g. a dummy "password123" string used only to test
+# a login form, or asserting on test fixtures - so it's excluded here
+# rather than scattering `# nosec` comments through every test file.
