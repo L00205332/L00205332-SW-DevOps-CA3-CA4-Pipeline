@@ -1,0 +1,66 @@
+# REFERENCE COPY - documents how Jenkins was set up for this assignment so
+# it can be reproduced from the repo alone. The live Jenkins is NOT run
+# from here: it lives in a shared folder outside any repo (D:\DevOps\jenkins,
+# same files saved there as docker-compose.yml + Dockerfile) so other
+# projects can reuse it later. Keep the copies in sync if you change one.
+#
+# Build:   docker compose build        (from the shared folder)
+# Start:   docker compose up -d
+# UI:      http://localhost:8080
+#
+# !! NEVER run `docker compose down -v` - it deletes the jenkins_home volume
+# !! (ALL of Jenkins' jobs, credentials and plugins).
+#
+# Backup:  docker run --rm -v jenkins_home:/data -v D:\DevOps\jenkins\backup:/backup alpine tar czf /backup/jenkins_home.tgz -C /data .
+# Restore: docker run --rm -v jenkins_home:/data -v D:\DevOps\jenkins\backup:/backup alpine tar xzf /backup/jenkins_home.tgz -C /data
+#
+# The image is the upstream Jenkins + git, docker CLI, AWS CLI v2 and
+# Terraform, built from the Dockerfile next to this file. No plugins are
+# pre-installed: add those by hand in the UI; they persist in the volume.
+
+name: jenkins
+
+services:
+  jenkins:
+    build: .
+    image: jenkins-tools:lts-jdk21
+    restart: unless-stopped
+    # Java 21 is required by current Jenkins LTS (the old lts-jdk17 image
+    # broke after an in-UI core upgrade). Upgrade Jenkins by bumping the
+    # FROM tag in the Dockerfile and rebuilding, NOT with the UI's "upgrade
+    # automatically" button: that swaps the WAR inside the running
+    # container, which is lost/inconsistent whenever it is recreated.
+    #
+    # Root so the container can use /var/run/docker.sock without matching
+    # group IDs between host and container. Fine for a single-developer
+    # local setup; not for a shared/production Jenkins.
+    user: root
+    ports:
+      - "8080:8080"   # Jenkins web UI
+      - "50000:50000" # inbound agent port - unused with the built-in node
+    volumes:
+      # Jenkins' entire state (jobs, credentials, plugins, workspaces).
+      # A Docker NAMED VOLUME, not a folder on the D: drive: Docker Desktop
+      # reaches Windows drives through a file-sharing layer that measured
+      # ~300x slower for small-file work (4.6 s vs 14 ms per 300 file
+      # lookups), which turned every Jenkins start into 15+ minutes. A named
+      # volume lives on the Linux VM's own disk, so it is fast, and it
+      # survives `docker compose down` and image rebuilds.
+      - jenkins_home:/var/jenkins_home
+      # Docker-outside-of-Docker (DooD): this container has no Docker daemon
+      # of its own. The docker CLI inside it talks to the HOST's Docker
+      # Desktop through this socket, so containers it starts are siblings,
+      # not nested.
+      #
+      # Gotcha when running `docker compose` FROM inside Jenkins: a relative
+      # host-path bind mount in the app's compose file (e.g. ./db/init.sql)
+      # resolves to a path inside Jenkins' filesystem, which the host daemon
+      # cannot see. Keep pipeline-run compose files free of host-path bind
+      # mounts (use named volumes, or bake files into images).
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  jenkins_home:
+    # Explicit name so it is exactly "jenkins_home" regardless of the
+    # compose project name.
+    name: jenkins_home
