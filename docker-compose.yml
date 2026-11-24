@@ -1,0 +1,68 @@
+# Local UAT stack: all three tiers, wired together the same way the
+# Jenkinsfile's "Deploy to UAT" stage will run them. Bring it up with:
+#   docker compose up --build
+#
+# Note: the db password here is a throwaway local-dev default, fine to
+# commit — it only ever talks to this container on your machine. The AWS
+# production deployment uses AWS Secrets Manager instead (see infra/).
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tasktracker
+      POSTGRES_USER: tasktracker
+      POSTGRES_PASSWORD: tasktracker
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      # Runs once against an empty data directory — see db/init.sql.
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tasktracker"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./app/backend
+    # Naming it lets the Jenkinsfile's "Deploy to UAT" stage point this at
+    # the exact image it just built and scanned (via the BACKEND_IMAGE env
+    # var), instead of rebuilding from source for every pipeline run.
+    # Locally, `docker compose up --build` just uses the default below.
+    image: ${BACKEND_IMAGE:-tasktracker-backend:local}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg2://tasktracker:tasktracker@db:5432/tasktracker
+    depends_on:
+      # Waits for Postgres to report healthy (not just "container started")
+      # before starting the backend, so its first startup doesn't race a
+      # database that isn't accepting connections yet.
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build: ./app/frontend
+    image: ${FRONTEND_IMAGE:-tasktracker-frontend:local}
+    restart: unless-stopped
+    environment:
+      # Service name "backend" is resolved via Docker's internal DNS —
+      # no hardcoded IPs needed between containers on the same network.
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+
+volumes:
+  db_data:
