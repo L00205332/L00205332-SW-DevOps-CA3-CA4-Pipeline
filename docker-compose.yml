@@ -8,16 +8,20 @@
 
 services:
   db:
-    image: postgres:16-alpine
+    # Built from db/Dockerfile (official Postgres + db/init.sql baked in),
+    # not a host-path bind mount: bind mounts break when compose runs from
+    # inside Jenkins, and can't exist on ECS. DB_IMAGE lets the Jenkinsfile
+    # run the exact image it built, like BACKEND_IMAGE below.
+    build: ./db
+    image: ${DB_IMAGE:-tasktracker-db:local}
     restart: unless-stopped
     environment:
       POSTGRES_DB: tasktracker
       POSTGRES_USER: tasktracker
       POSTGRES_PASSWORD: tasktracker
     volumes:
+      # A NAMED volume (managed by Docker), which is safe from inside Jenkins.
       - db_data:/var/lib/postgresql/data
-      # Runs once against an empty data directory — see db/init.sql.
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "5432:5432"
     healthcheck:

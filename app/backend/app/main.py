@@ -5,14 +5,35 @@ imported by tests (tests/conftest.py) which swap the database out from
 under it before the startup code fires.
 """
 
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from app import database
 from app.routers.tasks import router as tasks_router
+
+
+def _create_tables(attempts: int = 30, delay_seconds: float = 2.0) -> None:
+    """Create the tables, waiting for the database to accept connections.
+
+    On ECS (and Kubernetes) the backend and the database start at the same
+    time with no ordering guarantee, unlike docker-compose's `depends_on`.
+    Without this, the backend would crash on its first start, and the
+    scheduler would restart it in a loop until the database happened to be
+    ready. Retrying here makes startup order irrelevant.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            database.Base.metadata.create_all(bind=database.engine)
+            return
+        except OperationalError:
+            if attempt == attempts:
+                raise
+            time.sleep(delay_seconds)
 
 
 @asynccontextmanager
@@ -30,7 +51,7 @@ async def lifespan(_app: FastAPI):
     convenience for this assignment's scope, not a real migration strategy
     (Alembic would be the next step for a long-lived app).
     """
-    database.Base.metadata.create_all(bind=database.engine)
+    _create_tables()
     yield
 
 
