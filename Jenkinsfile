@@ -43,7 +43,9 @@ pipeline {
         ECR_REGISTRY     = '536241055252.dkr.ecr.eu-west-1.amazonaws.com'
         // Jenkins credential/config IDs - created once in the Jenkins UI,
         // not in code (see README runbook for exactly how).
-        AWS_CRED_ID      = 'aws-atu'
+        // The dedicated, least-privilege IAM user created by infra/bootstrap -
+        // never personal admin keys.
+        AWS_CRED_ID      = 'aws-jenkins-ci'
         SONARQUBE_SERVER = 'sonarcloud'
     }
 
@@ -114,8 +116,15 @@ pipeline {
                                 . .venv/bin/activate
                                 pip install --no-cache-dir -r requirements-dev.txt
                                 pytest --cov=app --cov-report=xml --junitxml=test-results.xml
+                                # pytest-cov writes paths relative to THIS directory
+                                # (app/crud.py), but Sonar resolves them from the repo
+                                # root - prefix them so Sonar can match the files.
+                                sed -i 's|filename="|filename="app/backend/|g' coverage.xml
                             '''
                         }
+                        // Parallel stages run in separate workspaces, so the
+                        // Sonar stage can't see this file unless it is stashed.
+                        stash name: 'coverage-backend', includes: 'app/backend/coverage.xml'
                     }
                     post {
                         always { junit 'app/backend/test-results.xml' }
@@ -131,8 +140,11 @@ pipeline {
                                 . .venv/bin/activate
                                 pip install --no-cache-dir -r requirements-dev.txt
                                 pytest --cov=. --cov-report=xml --junitxml=test-results.xml
+                                # Same path fix as the backend stage above.
+                                sed -i 's|filename="|filename="app/frontend/|g' coverage.xml
                             '''
                         }
+                        stash name: 'coverage-frontend', includes: 'app/frontend/coverage.xml'
                     }
                     post {
                         always { junit 'app/frontend/test-results.xml' }
@@ -166,10 +178,13 @@ pipeline {
                     // in it; with an ENTRYPOINT of `trivy`, that becomes
                     // `trivy cat`, the container exits at once and the stage
                     // fails before scanning anything.
+                    // The named volume caches Trivy's 137 MB vulnerability
+                    // database between runs (it is shared with the image scans
+                    // in stage 5), instead of re-downloading it every time.
                     agent {
                         docker {
                             image 'aquasec/trivy:latest'
-                            args '--entrypoint='
+                            args '--entrypoint= -v trivy-cache:/root/.cache/'
                         }
                     }
                     steps {
@@ -179,6 +194,10 @@ pipeline {
                 stage('SonarCloud scan') {
                     agent { docker { image 'sonarsource/sonar-scanner-cli:latest' } }
                     steps {
+                        // Bring in the coverage reports the Test stage produced
+                        // (they live at the paths sonar-project.properties expects).
+                        unstash 'coverage-backend'
+                        unstash 'coverage-frontend'
                         // withSonarQubeEnv injects SONAR_HOST_URL/SONAR_AUTH_TOKEN
                         // from the "sonarcloud" server config set up in Jenkins'
                         // own UI (Manage Jenkins > System) - never hardcoded here.
@@ -213,25 +232,29 @@ pipeline {
             // per-language container - see jenkins/Dockerfile.
             agent any
             steps {
+                // One image per tier (the data tier is Postgres + our schema,
+                // see db/Dockerfile). All three get the same tag: the commit.
                 sh '''
                     set -e
                     docker build -t "$ECR_REGISTRY/tasktracker-backend:$IMAGE_TAG" app/backend
                     docker build -t "$ECR_REGISTRY/tasktracker-frontend:$IMAGE_TAG" app/frontend
+                    docker build -t "$ECR_REGISTRY/tasktracker-db:$IMAGE_TAG" db
                 '''
                 sh '''
                     set -e
-                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy \
-                        image --exit-code 1 --severity CRITICAL "$ECR_REGISTRY/tasktracker-backend:$IMAGE_TAG"
-                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy \
-                        image --exit-code 1 --severity CRITICAL "$ECR_REGISTRY/tasktracker-frontend:$IMAGE_TAG"
+                    for tier in backend frontend db; do
+                        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache/ aquasec/trivy \
+                            image --exit-code 1 --severity CRITICAL "$ECR_REGISTRY/tasktracker-$tier:$IMAGE_TAG"
+                    done
                 '''
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CRED_ID}"]]) {
                     sh '''
                         set -e
                         aws ecr get-login-password --region "$AWS_REGION" \
                             | docker login --username AWS --password-stdin "$ECR_REGISTRY"
-                        docker push "$ECR_REGISTRY/tasktracker-backend:$IMAGE_TAG"
-                        docker push "$ECR_REGISTRY/tasktracker-frontend:$IMAGE_TAG"
+                        for tier in backend frontend db; do
+                            docker push "$ECR_REGISTRY/tasktracker-$tier:$IMAGE_TAG"
+                        done
                     '''
                 }
             }
@@ -242,22 +265,33 @@ pipeline {
             environment {
                 BACKEND_IMAGE  = "${ECR_REGISTRY}/tasktracker-backend:${IMAGE_TAG}"
                 FRONTEND_IMAGE = "${ECR_REGISTRY}/tasktracker-frontend:${IMAGE_TAG}"
+                DB_IMAGE       = "${ECR_REGISTRY}/tasktracker-db:${IMAGE_TAG}"
             }
             steps {
                 // --no-build: run the exact image just built/scanned/pushed
                 // above, don't silently rebuild from source here too.
                 sh 'docker compose -f docker-compose.yml up -d --no-build --remove-orphans'
+                // The smoke test runs INSIDE the containers (`compose exec`).
+                // `curl localhost:5000` from here would not work: this runs in
+                // the Jenkins container, where "localhost" is Jenkins itself,
+                // not the Docker host that publishes the UAT ports.
+                // The frontend's /healthz returns 200 only if it can reach the
+                // backend, so one call proves frontend -> backend works; the
+                // backend's /healthz proves backend -> database works.
                 sh '''
                     set -e
-                    for i in $(seq 1 10); do
-                        if curl --fail --silent http://localhost:8000/healthz \
-                           && curl --fail --silent http://localhost:5000/healthz; then
-                            echo "UAT is healthy"
+                    for i in $(seq 1 20); do
+                        if docker compose -f docker-compose.yml exec -T backend \
+                               python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')" \
+                           && docker compose -f docker-compose.yml exec -T frontend \
+                               python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/healthz')"; then
+                            echo "UAT is healthy: frontend -> backend -> database all answering"
                             exit 0
                         fi
                         sleep 3
                     done
-                    echo "UAT smoke test failed after 30s" >&2
+                    echo "UAT smoke test failed after 60s" >&2
+                    docker compose -f docker-compose.yml ps >&2
                     exit 1
                 '''
             }
@@ -275,13 +309,21 @@ pipeline {
         stage('8. Deploy to Prod (AWS)') {
             agent any
             steps {
-                dir('infra') {
+                // infra/prod's Terraform state lives in S3 (see infra/prod/
+                // versions.tf), so a fresh checkout still knows what exists.
+                // Prerequisite: infra/bootstrap has been applied once, by hand.
+                dir('infra/prod') {
                     withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CRED_ID}"]]) {
                         sh '''
                             set -e
                             terraform init -input=false
                             terraform apply -auto-approve -input=false -var="image_tag=$IMAGE_TAG"
                         '''
+                        script {
+                            // Kept in an env var for the next stage, which may
+                            // run in a different workspace.
+                            env.ALB_URL = sh(script: 'terraform output -raw alb_url', returnStdout: true).trim()
+                        }
                     }
                 }
             }
@@ -290,19 +332,48 @@ pipeline {
         stage('9. Post-deploy smoke test & monitoring') {
             agent any
             steps {
-                script {
-                    def albUrl = sh(script: 'cd infra && terraform output -raw alb_url', returnStdout: true).trim()
-                    sh "curl --fail ${albUrl}/healthz"
+                // A new load balancer can take a minute or two to start
+                // routing, so retry rather than fail on the first attempt.
+                sh '''
+                    set -e
+                    for i in $(seq 1 20); do
+                        if curl --fail --silent --show-error "$ALB_URL/healthz"; then
+                            echo
+                            echo "Production is healthy at $ALB_URL"
+                            exit 0
+                        fi
+                        sleep 10
+                    done
+                    echo "Production smoke test failed after 200s" >&2
+                    exit 1
+                '''
+                // The pipeline feedback loop: ask CloudWatch whether any alarm
+                // (5xx errors, unhealthy targets, high CPU - see
+                // infra/prod/monitoring.tf) is firing right after the deploy,
+                // and fail the build if so. Alarms in the INSUFFICIENT_DATA
+                // state (brand new, no data yet) are not counted.
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CRED_ID}"]]) {
+                    sh '''
+                        set -e
+                        FIRING=$(aws cloudwatch describe-alarms --region "$AWS_REGION" \
+                            --alarm-name-prefix tasktracker- --state-value ALARM \
+                            --query 'MetricAlarms[].AlarmName' --output text)
+                        if [ -n "$FIRING" ]; then
+                            echo "CloudWatch alarms firing after the deploy: $FIRING" >&2
+                            exit 1
+                        fi
+                        echo "No CloudWatch alarms firing"
+                    '''
                 }
-                echo 'Dashboards: monitoring/ - one Grafana dashboard scrapes both the UAT containers and this Prod deployment via Prometheus.'
+                echo 'Dashboards: monitoring/ - Prometheus scrapes the application tiers and Grafana visualises them.'
             }
         }
     }
 
+    // Pipeline-level `post` runs with no agent (the top-level `agent none`),
+    // so it may only use steps that need no node, like `echo`. A `sh` step
+    // here fails with "requires a node context".
     post {
-        always {
-            sh 'docker compose -f docker-compose.yml ps || true'
-        }
         failure {
             // A real team would also page/Slack someone here - kept to a
             // log line since that's outside this assignment's scope.
