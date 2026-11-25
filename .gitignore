@@ -16,7 +16,7 @@ build/
 # .terraform.lock.hcl IS committed on purpose (pins provider versions for
 # reproducible `terraform init` runs) - only the local working state below
 # is ignored.
-infra/.terraform/
+**/.terraform/
 *.tfstate
 *.tfstate.*
 *.tfvars
