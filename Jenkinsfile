@@ -121,10 +121,10 @@ pipeline {
                                 . .venv/bin/activate
                                 pip install --no-cache-dir -r requirements-dev.txt
                                 pytest --cov=app --cov-report=xml --junitxml=test-results.xml
-                                # pytest-cov writes paths relative to THIS directory
-                                # (app/crud.py), but Sonar resolves them from the repo
-                                # root - prefix them so Sonar can match the files.
-                                sed -i 's|filename="|filename="app/backend/|g' coverage.xml
+                                # pytest-cov writes paths relative to the measured package
+                                # (crud.py, routers/tasks.py), but Sonar resolves them from
+                                # the repo root - prefix them so Sonar can match the files.
+                                sed -i 's|filename="|filename="app/backend/app/|g' coverage.xml
                             '''
                         }
                         // Parallel stages run in separate workspaces, so the
@@ -206,6 +206,15 @@ pipeline {
                         // (they live at the paths sonar-project.properties expects).
                         unstash 'coverage-backend'
                         unstash 'coverage-frontend'
+                        // The reports' <source> still names the TEST stage's
+                        // workspace (e.g. ca3-pipeline@2); Sonar resolves file paths
+                        // against it, so point it at this stage's workspace instead.
+                        // readFile/writeFile avoid depending on tools in the image.
+                        script {
+                            ['app/backend/coverage.xml', 'app/frontend/coverage.xml'].each { f ->
+                                writeFile file: f, text: readFile(f).replaceAll('<source>[^<]*</source>', "<source>${env.WORKSPACE}</source>")
+                            }
+                        }
                         // withSonarQubeEnv injects SONAR_HOST_URL/SONAR_AUTH_TOKEN
                         // from the "sonarcloud" server config set up in Jenkins'
                         // own UI (Manage Jenkins > System) - never hardcoded here.
