@@ -153,6 +153,14 @@ Format per entry: **Symptom** (what we saw), **Root cause**, **Fix**,
 - **Verified in build #4:** all three images 0 vulnerabilities; the db container runs as `postgres`; `/usr/local/bin/gosu` no longer exists; UAT healthy end to end.
 - **CA4:** challenges (headline example); DevSecOps; best practice.
 
+### C9. Build #7: an "ENTRYPOINT" warning, and pinning the tool images
+- **Symptom:** build #7 logged `ERROR: The container started but didn't run the expected command. Please double check your ENTRYPOINT...` for the SonarScanner container; the scan nevertheless ran normally. Builds #5 and #6 had no such line.
+- **First hypothesis, wrong:** "the `:latest` image changed". Checked: no build pulled the image; it was the same local image every time.
+- **Actual cause:** Jenkins runs `docker top` a split second after starting the container to confirm the process is `cat`. This image starts via an entrypoint script that then hands over to `cat`, so the check is a timing race: usually passed, occasionally caught mid-handover. Intermittent and harmless here.
+- **Still worth fixing:** all tool images used `:latest` (or a floating tag), so the pipeline's behaviour *could* change on any pull with no commit. All five uses are now pinned to exact digests (python 3.12-slim, Trivy v0.76.2, SonarScanner CLI 8.5.0, Gitleaks v8.30.1). Trade-off: no automatic scanner updates; bump digests deliberately (Renovate/Dependabot).
+- **Lesson:** test the first explanation against evidence before acting on it; reproducible builds need pinned inputs, not just pinned code.
+- **CA4:** challenges (honest wrong hypothesis); best practice (reproducibility, supply chain); improvements (automated dependency bumps).
+
 ---
 
 ## D. Infrastructure and deployment (AWS)
@@ -222,6 +230,7 @@ Format per entry: **Symptom** (what we saw), **Root cause**, **Fix**,
 - **How it was found:** while questioning *why* we monitor UAT, we checked whether production's metrics were reachable. `GET http://<alb>/metrics` returned **HTTP 200**, exposing the exact Python version (3.12.16), process memory and request counters.
 - **Risk:** information disclosure that helps an attacker fingerprint the stack (CWE-200). Low severity, trivial to exploit.
 - **Fix:** an ALB listener rule (`aws_lb_listener_rule.block_metrics`, `infra/prod/alb.tf`) answers 404 for `/metrics` before the request reaches a container; metrics stay reachable inside the VPC for an in-VPC Prometheus. A **security regression test** was added to the Jenkinsfile's Stage 9: every deploy now fails if `/metrics` answers anything but 404 from the internet.
+- **Verified (build #7, `Finished: SUCCESS`):** `GET /metrics` from the internet now returns `Not Found` (HTTP 404), while `/healthz` and the UI still return 200; Stage 9 logged `OK: /metrics is not exposed to the internet (HTTP 404)`.
 - **Lesson:** observability endpoints are part of the attack surface; "it's just metrics" is not a reason to expose them.
 - **CA4:** DevSecOps; challenges; improvements.
 
@@ -268,6 +277,7 @@ Format per entry: **Symptom** (what we saw), **Root cause**, **Fix**,
 - Deploy the ECS services in parallel and tune health checks, cutting Stage 8 from about 9 to about 3-4 minutes (D9).
 - Collect app-level metrics in production with Prometheus inside the VPC (Amazon Managed Prometheus/Grafana).
 - Automate the promotion gate: after UAT, query Prometheus for error rate and latency and refuse to promote on a regression.
+- Pin the application Dockerfiles' base images (`python:3.12-slim`, `postgres:16-alpine`) by digest too, with Renovate/Dependabot opening PRs for updates (C9).
 
 ## G. Evidence to capture (screenshots/logs for the report and demo)
 

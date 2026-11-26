@@ -20,6 +20,11 @@
 //   AmazonWebServicesCredentialsBinding used in the deploy stages.)
 //   See the README runbook for the one-time setup.
 //
+// - Every tool image (python, trivy, sonar-scanner, gitleaks) is pinned to an
+//   exact digest (`image@sha256:...`), not a moving tag like `:latest`, so the
+//   same commit always runs the same tools. Trade-off: no automatic scanner
+//   updates - bump the digests deliberately (e.g. with Renovate/Dependabot).
+//
 // - Shell blocks use single-quoted `sh '''...'''`, not double-quoted
 //   `sh """..."""`, wherever only an environment variable needs
 //   substituting (`$IMAGE_TAG`). Single-quoted means Groovy does NOT
@@ -68,7 +73,7 @@ pipeline {
         stage('2. Build') {
             parallel {
                 stage('Backend: install + lint') {
-                    agent { docker { image 'python:3.12-slim' } }
+                    agent { docker { image 'python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b' } }
                     steps {
                         dir('app/backend') {
                             sh '''
@@ -83,7 +88,7 @@ pipeline {
                     }
                 }
                 stage('Frontend: install + lint') {
-                    agent { docker { image 'python:3.12-slim' } }
+                    agent { docker { image 'python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b' } }
                     steps {
                         dir('app/frontend') {
                             sh '''
@@ -107,7 +112,7 @@ pipeline {
             // which matters more than speed for an assignment pipeline.
             parallel {
                 stage('Backend tests') {
-                    agent { docker { image 'python:3.12-slim' } }
+                    agent { docker { image 'python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b' } }
                     steps {
                         dir('app/backend') {
                             sh '''
@@ -131,7 +136,7 @@ pipeline {
                     }
                 }
                 stage('Frontend tests') {
-                    agent { docker { image 'python:3.12-slim' } }
+                    agent { docker { image 'python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b' } }
                     steps {
                         dir('app/frontend') {
                             sh '''
@@ -158,7 +163,7 @@ pipeline {
             // in parallel - none of them need each other's output.
             parallel {
                 stage('Bandit (Python security lint)') {
-                    agent { docker { image 'python:3.12-slim' } }
+                    agent { docker { image 'python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b' } }
                     steps {
                         sh '''
                             set -e
@@ -183,7 +188,7 @@ pipeline {
                     // in stage 5), instead of re-downloading it every time.
                     agent {
                         docker {
-                            image 'aquasec/trivy:latest'
+                            image 'aquasec/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb' // v0.76.2
                             args '--entrypoint= -v trivy-cache:/root/.cache/'
                         }
                     }
@@ -192,7 +197,10 @@ pipeline {
                     }
                 }
                 stage('SonarCloud scan') {
-                    agent { docker { image 'sonarsource/sonar-scanner-cli:latest' } }
+                    // SonarScanner CLI 8.5.0. Its image starts via an entrypoint script, so
+                    // Jenkins may log a harmless "didn't run the expected command"
+                    // warning if it checks before the script hands over to `cat`.
+                    agent { docker { image 'sonarsource/sonar-scanner-cli@sha256:8bb84373f00346f9a579adb7ccb2999f8cd050ab7167fa9ae08a16069de03c84' } }
                     steps {
                         // Bring in the coverage reports the Test stage produced
                         // (they live at the paths sonar-project.properties expects).
@@ -215,7 +223,7 @@ pipeline {
                     // Same ENTRYPOINT issue as the Trivy stage above.
                     agent {
                         docker {
-                            image 'zricethezav/gitleaks:latest'
+                            image 'zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f' // v8.30.1
                             args '--entrypoint='
                         }
                     }
@@ -243,7 +251,7 @@ pipeline {
                 sh '''
                     set -e
                     for tier in backend frontend db; do
-                        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache/ aquasec/trivy \
+                        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache/ aquasec/trivy@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb \
                             image --exit-code 1 --severity CRITICAL "$ECR_REGISTRY/tasktracker-$tier:$IMAGE_TAG"
                     done
                 '''
