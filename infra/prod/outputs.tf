@@ -18,6 +18,11 @@ output "log_groups" {
   value       = { for tier, group in aws_cloudwatch_log_group.app : tier => group.name }
 }
 
+output "dashboard_url" {
+  description = "Link to the production CloudWatch dashboard (requires an AWS console login)."
+  value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards/dashboard/${aws_cloudwatch_dashboard.production.dashboard_name}"
+}
+
 output "alerts_topic_arn" {
   description = "SNS topic the alarms publish to."
   value       = aws_sns_topic.alerts.arn
