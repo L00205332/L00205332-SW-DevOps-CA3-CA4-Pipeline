@@ -161,6 +161,25 @@ Format per entry: **Symptom** (what we saw), **Root cause**, **Fix**,
 - **Lesson:** test the first explanation against evidence before acting on it; reproducible builds need pinned inputs, not just pinned code.
 - **CA4:** challenges (honest wrong hypothesis); best practice (reproducibility, supply chain); improvements (automated dependency bumps).
 
+### C10. SonarQube Cloud: 0% coverage, a failing quality gate, and 17 findings to triage
+- **Symptom:** the project page showed **coverage 0.0%**, **quality gate ERROR** (new security rating C, new coverage 0%) and **17 "vulnerabilities"**. Worse, the README and the CA4 draft claimed all four scanners *fail the build*, but nothing in the pipeline waited for Sonar's verdict: it only reported.
+- **Coverage root cause:** Sonar logged `Cannot resolve the file path 'app/backend/__init__.py'`. Two bugs in my earlier fix (C4): the backend prefix was one folder short (`app/backend/` instead of `app/backend/app/`), and the reports' `<source>` still named the *test* stage's workspace (`ca3-pipeline@2`). **Fix:** correct prefix; rewrite `<source>` to the Sonar stage's workspace with Jenkins `readFile`/`writeFile` (no dependency on tools inside the scanner image).
+- **Enforcement, a deliberate decision NOT to block:** SonarQube Cloud stays **advisory**. It reports quality, coverage and findings, but never fails the pipeline; Bandit, Trivy and Gitleaks are the blocking security gates. Reasoning: Sonar's default gate judges "new code" against rules and thresholds set outside the project (it flagged ten infrastructure trade-offs as vulnerabilities on its first run), so making it blocking would turn every new rule into a stopped release. Its findings are triaged by hand instead. The README and report were corrected, because they had claimed all four scanners block. If needed later, `sonar.qualitygate.wait=true` makes the scanner wait for the verdict and fail on a red gate (Jenkins' `waitForQualityGate` needs a webhook a localhost Jenkins can't receive).
+- **Triage of the 17, fixed in code (6):**
+  - `curl` without `--proto =https` (3, `jenkins/Dockerfile`): now HTTPS-only and TLS 1.2+.
+  - pip could run package setup scripts (2): `--only-binary :all:` (every dependency already installs from wheels).
+  - A password inside the default `DATABASE_URL` in `database.py` (1): the default is now a password-free local SQLite file.
+  - The Terraform state bucket allowed non-HTTPS requests (1, `infra/bootstrap`): a Deny-unless-`aws:SecureTransport` bucket policy.
+- **Accepted with a written justification (10), as a conscious risk decision rather than a silenced warning:**
+  - pip installs not hash-locked (2): versions are pinned exactly; hash-locking is in the backlog.
+  - The UAT compose DB password (2): a throwaway credential for a local-only database; production uses Secrets Manager.
+  - Access logging off on the ALB and S3 (2) and 7-day log retention (1): cost, for a short-lived demo system.
+  - The HTTP listener (1): no domain for a certificate (documented; HTTPS is in the backlog).
+  - CSRF not enabled in Flask (1): the app has no login, session or cookies, so a cross-site request gains nothing that a direct request couldn't.
+  - SNS topic without KMS (1): encrypting with AWS's own SNS key would stop CloudWatch alarms publishing to it (CloudWatch needs a customer-managed key policy); a customer-managed key is in the backlog.
+- **Lesson:** be precise about which tools are gates and which are advisors; documentation had overclaimed. Triage, meaning fixing what's cheap and justifying what's accepted, is the real DevSecOps work, not getting to "zero findings" at any cost.
+- **CA4:** DevSecOps; challenges; benefits and drawbacks (alert fatigue, false positives); best practice (risk acceptance with justification).
+
 ---
 
 ## D. Infrastructure and deployment (AWS)
@@ -278,6 +297,8 @@ Format per entry: **Symptom** (what we saw), **Root cause**, **Fix**,
 - Collect app-level metrics in production with Prometheus inside the VPC (Amazon Managed Prometheus/Grafana).
 - Automate the promotion gate: after UAT, query Prometheus for error rate and latency and refuse to promote on a regression.
 - Pin the application Dockerfiles' base images (`python:3.12-slim`, `postgres:16-alpine`) by digest too, with Renovate/Dependabot opening PRs for updates (C9).
+- Hash-locked Python dependencies (`pip-compile --generate-hashes`, `pip install --require-hashes`); a customer-managed KMS key for the SNS alerts topic; ALB and S3 access logging (C10).
+- Once findings are triaged and the gate is tuned to the project, make the SonarQube Cloud quality gate blocking (`sonar.qualitygate.wait=true`) (C10).
 
 ## G. Evidence to capture (screenshots/logs for the report and demo)
 
