@@ -39,6 +39,37 @@ resource "aws_s3_bucket_public_access_block" "tfstate" {
   restrict_public_buckets = true
 }
 
+# Refuse any request to the state bucket that isn't over HTTPS, so state
+# (which can contain secrets) can never travel in clear text, even if a
+# client is misconfigured. Flagged by SonarQube Cloud (terraform:S6249).
+# A Deny-only policy is not "public", so the access block above allows it.
+data "aws_iam_policy_document" "tfstate_tls_only" {
+  statement {
+    sid       = "DenyInsecureTransport"
+    effect    = "Deny"
+    actions   = ["s3:*"]
+    resources = [aws_s3_bucket.tfstate.arn, "${aws_s3_bucket.tfstate.arn}/*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "tfstate" {
+  bucket = aws_s3_bucket.tfstate.id
+  policy = data.aws_iam_policy_document.tfstate_tls_only.json
+
+  depends_on = [aws_s3_bucket_public_access_block.tfstate]
+}
+
 # ---------------------------------------------------------------------------
 # 2. ECR repositories (one per image the pipeline builds)
 # ---------------------------------------------------------------------------

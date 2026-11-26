@@ -6,7 +6,9 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# --only-binary: install prebuilt wheels only, so no package's setup script
+# can run arbitrary code at build time (SonarQube Cloud rule docker:S8541).
+RUN pip install --no-cache-dir --only-binary :all: -r requirements.txt
 
 # ---- runtime: copy only the venv + app code, run as non-root ----
 FROM python:3.12-slim

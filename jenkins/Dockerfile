@@ -34,7 +34,7 @@ ARG TERRAFORM_VERSION=1.17.1
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates curl gnupg unzip \
     && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && curl --proto '=https' --tlsv1.2 -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
         > /etc/apt/sources.list.d/docker.list \
@@ -45,14 +45,14 @@ RUN apt-get update \
 # AWS CLI v2 - `aws ecr get-login-password` (Containerise stage) and the
 # credentials Terraform uses (Deploy to Prod stage). uname -m gives
 # x86_64 / aarch64, which is exactly how AWS names its downloads.
-RUN curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip \
+RUN curl --proto '=https' --tlsv1.2 -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip \
     && unzip -q /tmp/awscliv2.zip -d /tmp \
     && /tmp/aws/install \
     && rm -rf /tmp/awscliv2.zip /tmp/aws
 
 # Terraform - provisions/updates the AWS production environment (infra/).
 # dpkg's arch names (amd64 / arm64) match HashiCorp's download names.
-RUN curl -fsSL "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_$(dpkg --print-architecture).zip" -o /tmp/terraform.zip \
+RUN curl --proto '=https' --tlsv1.2 -fsSL "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_$(dpkg --print-architecture).zip" -o /tmp/terraform.zip \
     && unzip -q /tmp/terraform.zip -d /usr/local/bin terraform \
     && rm /tmp/terraform.zip
 
