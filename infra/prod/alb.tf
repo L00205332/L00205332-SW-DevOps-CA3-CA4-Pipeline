@@ -53,3 +53,31 @@ resource "aws_lb_listener" "http" {
     target_group_arn = aws_lb_target_group.frontend.arn
   }
 }
+
+# Security fix: the frontend's Prometheus endpoint (/metrics) was readable by
+# anyone through the load balancer, revealing the exact Python version,
+# memory use and request counters (information disclosure, CWE-200). This
+# rule answers 404 to the internet before the request ever reaches a
+# container. Metrics remain reachable INSIDE the VPC, where an in-VPC
+# Prometheus would scrape them. The Jenkinsfile's last stage re-checks this
+# on every deploy, so the exposure can't silently come back.
+resource "aws_lb_listener_rule" "block_metrics" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 10
+
+  condition {
+    path_pattern {
+      values = ["/metrics", "/metrics/*"]
+    }
+  }
+
+  action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "Not Found"
+      status_code  = "404"
+    }
+  }
+}

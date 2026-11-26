@@ -347,6 +347,18 @@ pipeline {
                     echo "Production smoke test failed after 200s" >&2
                     exit 1
                 '''
+                // Security regression test: the Prometheus endpoint must NOT be
+                // reachable from the internet (it leaked version and process
+                // details before the load-balancer rule in infra/prod/alb.tf).
+                sh '''
+                    set -e
+                    CODE=$(curl --silent --output /dev/null --write-out "%{http_code}" "$ALB_URL/metrics")
+                    if [ "$CODE" != "404" ]; then
+                        echo "SECURITY: /metrics is publicly reachable (HTTP $CODE)" >&2
+                        exit 1
+                    fi
+                    echo "OK: /metrics is not exposed to the internet (HTTP 404)"
+                '''
                 // The pipeline feedback loop: ask CloudWatch whether any alarm
                 // (5xx errors, unhealthy targets, high CPU - see
                 // infra/prod/monitoring.tf) is firing right after the deploy,
@@ -365,7 +377,7 @@ pipeline {
                         echo "No CloudWatch alarms firing"
                     '''
                 }
-                echo 'Dashboards: monitoring/ - Prometheus scrapes the application tiers and Grafana visualises them.'
+                echo 'Production dashboard: the dashboard_url output of infra/prod (CloudWatch). UAT: monitoring/ (Prometheus + Grafana).'
             }
         }
     }

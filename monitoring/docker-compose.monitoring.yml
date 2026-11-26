@@ -1,0 +1,60 @@
+# Monitoring stack for the UAT environment: Prometheus collects metrics,
+# Grafana visualises them, and Prometheus alert rules flag problems.
+#
+# Run it YOURSELF from this folder (not from Jenkins):
+#   $env:GRAFANA_ADMIN_PASSWORD = "<pick one>"
+#   docker compose -f docker-compose.monitoring.yml up -d
+# Prometheus: http://localhost:9090   (Status > Targets, Alerts)
+# Grafana:    http://localhost:3000   (user "admin", the password you set)
+#
+# Why not in the app's docker-compose.yml? That file is run by Jenkins, from
+# inside the Jenkins container, where host-path bind mounts (like the config
+# files below) point at paths the Docker daemon can't see. Run from your own
+# terminal, they work normally.
+#
+# Production is monitored separately in AWS (CloudWatch logs, metrics and
+# alarms - see infra/prod/monitoring.tf).
+
+name: monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    # The UAT containers publish their ports on the host machine; this name
+    # lets Prometheus (inside a container) reach "the host".
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      # No default on purpose: compose refuses to start until you choose a
+      # password, so no shared/default credential ever ends up in the repo.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD before starting}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      # "Provisioning": the data source and dashboard are created from these
+      # files at start-up - nothing to click through, and it's all versioned.
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus_data:
+  grafana_data:

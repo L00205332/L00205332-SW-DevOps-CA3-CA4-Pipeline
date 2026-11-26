@@ -1,0 +1,12 @@
+# Tells Grafana where its data comes from: the Prometheus container, reached
+# by its compose service name over the stack's private network.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus # fixed ID, referenced by the dashboard JSON
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

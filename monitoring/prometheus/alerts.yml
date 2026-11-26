@@ -1,0 +1,47 @@
+# Alert rules: conditions that mean "a human should look at this".
+# Prometheus checks them every 15 s; a rule must stay true for its `for:`
+# period before it "fires" (so one slow request doesn't wake anyone).
+# Firing alerts are listed at http://localhost:9090/alerts and in the
+# Grafana dashboard's "Firing alerts" panel.
+
+groups:
+  - name: tasktracker
+    rules:
+      # A tier stopped answering its /metrics endpoint: crashed, stopped,
+      # or unreachable.
+      - alert: TierDown
+        expr: up{job=~"backend|frontend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} ({{ $labels.env }}) is down"
+          description: "Prometheus has not been able to scrape {{ $labels.instance }} for over 1 minute."
+
+      # More than 5% of API requests are failing with server errors.
+      # clamp_min avoids dividing by zero when there is no traffic.
+      - alert: BackendHighErrorRate
+        expr: |
+          sum by (env) (rate(http_requests_total{job="backend", status="5xx"}[5m]))
+            /
+          clamp_min(sum by (env) (rate(http_requests_total{job="backend"}[5m])), 0.001)
+            > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backend 5xx error rate above 5% ({{ $labels.env }})"
+          description: "{{ $value | humanizePercentage }} of API requests are failing."
+
+      # The UI is slow for users: 95% of page loads take longer than 1 second.
+      - alert: FrontendSlow
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, env) (rate(flask_http_request_duration_seconds_bucket{job="frontend"}[5m]))
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Frontend p95 latency above 1s ({{ $labels.env }})"
+          description: "95th percentile page time is {{ $value | humanizeDuration }}."

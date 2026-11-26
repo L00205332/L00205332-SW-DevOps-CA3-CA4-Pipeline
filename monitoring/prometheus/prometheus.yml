@@ -1,0 +1,34 @@
+# What Prometheus collects, and how often.
+#
+# Both application tiers expose a /metrics endpoint (see app/backend/app/main.py
+# and app/frontend/app.py). Every 15 seconds Prometheus "scrapes" them and
+# stores each value with a timestamp; Grafana then draws graphs from that.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s # how often the alert rules are checked
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  # The UAT containers (deployed by the Jenkinsfile's "Deploy to UAT" stage)
+  # publish ports 8000 and 5000 on the host machine.
+  - job_name: backend
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+        labels:
+          env: uat
+          tier: application
+
+  - job_name: frontend
+    static_configs:
+      - targets: ["host.docker.internal:5000"]
+        labels:
+          env: uat
+          tier: presentation
+
+  # Prometheus' own health, so a broken scrape setup is visible too.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
