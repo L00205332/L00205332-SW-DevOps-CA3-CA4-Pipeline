@@ -1,0 +1,12 @@
+# Loads every dashboard JSON file from /var/lib/grafana/dashboards (mounted
+# from monitoring/grafana/dashboards) into a "Task Tracker" folder, so the
+# dashboard is defined as code and versioned in Git like everything else.
+apiVersion: 1
+
+providers:
+  - name: tasktracker
+    folder: Task Tracker
+    type: file
+    disableDeletion: true
+    options:
+      path: /var/lib/grafana/dashboards
