@@ -8,6 +8,7 @@ venv/
 .coverage
 coverage.xml
 htmlcov/
+local-dev.db
 *.egg-info/
 dist/
 build/

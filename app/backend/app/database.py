@@ -11,13 +11,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 # DATABASE_URL is read from the environment so each place this app runs
-# (local pytest, docker-compose UAT, AWS prod) can point it at a different
-# database without changing any code. The default below only matters for
-# running the app directly on a dev machine against a local Postgres.
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql+psycopg2://tasktracker:tasktracker@localhost:5432/tasktracker",
-)
+# (docker-compose UAT, AWS prod) can point it at a different database
+# without changing any code. The fallback is a local SQLite file, used only
+# when running the app directly on a dev machine: it needs no server and,
+# unlike a Postgres URL, contains no password (SonarQube Cloud flagged the
+# previous credential-bearing default).
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./local-dev.db")
 
 # pool_pre_ping checks a connection is still alive before handing it to a
 # request, instead of failing the request when it hits a connection that

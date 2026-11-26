@@ -50,16 +50,20 @@ accepts traffic from the tier in front of it.
 | 1 | Checkout | Clones the repo; image tag = short commit SHA | |
 | 2 | Build | Backend and frontend in parallel: install, `ruff`, `black --check` | lint or format errors |
 | 3 | Test | `pytest` with coverage and JUnit reports, both tiers in parallel | any test fails |
-| 4 | Static analysis and security | **Bandit** (Python security), **Trivy** (dependency CVEs), **SonarQube Cloud** (code quality and coverage), **Gitleaks** (secrets in Git history), in parallel | any finding above threshold |
+| 4 | Static analysis and security | **Bandit** (Python security), **Trivy** (dependency CVEs), **SonarQube Cloud** (code quality and coverage), **Gitleaks** (secrets in Git history), in parallel | a Bandit, Trivy or Gitleaks finding above threshold (SonarQube Cloud is advisory) |
 | 5 | Containerise | Builds 3 images, **Trivy-scans each image**, pushes to ECR | a CRITICAL CVE in an image |
 | 6 | Deploy to UAT | `docker compose up` with the exact scanned images; smoke test frontend, backend and database | UAT not healthy within 60 s |
 | 7 | Promotion gate | **Pauses for a human to approve** production | (manual) |
 | 8 | Deploy to production | `terraform apply` with the new image tag; ECS rolling deploy with automatic rollback | apply or rollout fails |
 | 9 | Post-deploy checks | Production smoke test; **fails if any CloudWatch alarm is firing**; **security check that `/metrics` is not public** | any check fails |
 
-Scanners are **enforced**, never `|| true`: during development the image scan
-blocked a release over a CRITICAL CVE (CVE-2025-68121) inside the official
-Postgres image; it was fixed by removing the affected component.
+The security scanners **Bandit, Trivy and Gitleaks are enforced** (never `|| true`):
+during development the image scan blocked a release over a CRITICAL CVE
+(CVE-2025-68121) inside the official Postgres image; it was fixed by removing
+the affected component. **SonarQube Cloud is deliberately advisory**: it reports
+quality, coverage and findings without blocking, and its findings are triaged
+by hand: fixed in code, or accepted with a written justification
+([`docs/engineering-log.md`](docs/engineering-log.md), entry C10).
 
 ---
 
