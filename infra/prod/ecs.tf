@@ -76,6 +76,16 @@ resource "aws_service_discovery_service" "app" {
   # of DNS. (Its old `failure_threshold` setting is deprecated: AWS now
   # always uses 1.)
   health_check_custom_config {}
+
+  # AWS no longer returns anything for this (now settings-free) block, so on
+  # every refresh Terraform saw "block missing", and because the setting
+  # can't be changed in place it planned to DESTROY and recreate all three
+  # DNS services on every deploy. That would also force the ECS services that
+  # reference them to be replaced (downtime). The block can only be set at
+  # creation, so ignoring later differences is safe.
+  lifecycle {
+    ignore_changes = [health_check_custom_config]
+  }
 }
 
 # ---------------------------------------------------------------------------
