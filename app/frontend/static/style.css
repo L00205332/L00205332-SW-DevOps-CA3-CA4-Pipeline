@@ -7,3 +7,4 @@ th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #ddd; }
 .status { padding: 0.1rem 0.5rem; border-radius: 4px; background: #eee; }
 form label { display: block; margin-bottom: 0.75rem; }
 input, textarea, select { width: 100%; padding: 0.4rem; }
+footer { margin-top: 2rem; padding-top: 0.75rem; border-top: 1px solid #ddd; font-size: 0.85rem; color: #666; }
