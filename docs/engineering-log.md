@@ -177,6 +177,7 @@ Format per entry: **Symptom** (what we saw), **Root cause**, **Fix**,
   - The HTTP listener (1): no domain for a certificate (documented; HTTPS is in the backlog).
   - CSRF not enabled in Flask (1): the app has no login, session or cookies, so a cross-site request gains nothing that a direct request couldn't.
   - SNS topic without KMS (1): encrypting with AWS's own SNS key would stop CloudWatch alarms publishing to it (CloudWatch needs a customer-managed key policy); a customer-managed key is in the backlog.
+- **Verified (build #9, `Finished: SUCCESS`, PR #8):** SonarQube Cloud coverage rose from **0.0% to 91.8%**; **11 findings closed as FIXED**, including the password-bearing default in `database.py`, curl HTTPS-only (3), wheels only (2) and the TLS-only state bucket. The 10 remaining open findings are exactly the accept list above, including the two UAT compose-password findings. All three images scanned clean (0); production healthy; `/metrics` 404; no alarms. Three of the ten were then marked Accepted in SonarQube Cloud (7 still show as open there); the written justification for all ten is this list, which is the record of the risk decision.
 - **Lesson:** be precise about which tools are gates and which are advisors; documentation had overclaimed. Triage, meaning fixing what's cheap and justifying what's accepted, is the real DevSecOps work, not getting to "zero findings" at any cost.
 - **CA4:** DevSecOps; challenges; benefits and drawbacks (alert fatigue, false positives); best practice (risk acceptance with justification).
 
